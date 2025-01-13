@@ -102,7 +102,10 @@ $biggestSpending = $query->fetch(PDO::FETCH_ASSOC);
                 <li class="nav-item"><a class="nav-link" href="settings.php">Settings</a></li>
             </ul>
             <span class="navbar-text">
-                <?= htmlspecialchars($_SESSION['username']) ?> | <a href="logout.php" class="text-light">Logout</a>
+                <?php if (isset($user['photo']) && $user['photo']): ?>
+                    <img src="<?= htmlspecialchars($user['photo']) ?>" alt="Profile Photo">
+                <?php endif; ?>
+                <a href="profile.php"><?= htmlspecialchars($_SESSION['username']) ?></a> | <a href="logout.php" class="text-light">Logout</a>
             </span>
         </div>
     </div>
@@ -253,6 +256,8 @@ $biggestSpending = $query->fetch(PDO::FETCH_ASSOC);
                 }
             }
         });
+
+        
 
         // AI Analysis
         var aiAnalysis = document.getElementById('aiAnalysis');

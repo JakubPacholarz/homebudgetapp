@@ -40,6 +40,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['photo'])) {
     }
 }
 
+// Handle photo deletion
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_photo'])) {
+    // Fetch the current photo path
+    $query = $db->prepare("SELECT photo FROM users WHERE id = ?");
+    $query->execute([$userId]);
+    $user = $query->fetch(PDO::FETCH_ASSOC);
+
+    if ($user && $user['photo']) {
+        // Delete the photo file from the server
+        if (unlink($user['photo'])) {
+            // Update the database to remove the photo path
+            $query = $db->prepare("UPDATE users SET photo = NULL WHERE id = ?");
+            $query->execute([$userId]);
+            $message = "Profile photo has been deleted.";
+        } else {
+            $error = "Sorry, there was an error deleting your photo.";
+        }
+    } else {
+        $error = "No photo found to delete.";
+    }
+}
+
 // Handle regular payments
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['amount'], $_POST['description'], $_POST['category'], $_POST['day'])) {
     $amount = floatval($_POST['amount']);
@@ -61,11 +83,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['amount'], $_POST['des
 $query = $db->prepare("SELECT * FROM users WHERE id = ?");
 $query->execute([$userId]);
 $user = $query->fetch(PDO::FETCH_ASSOC);
-
-// Fetch regular payments
-$query = $db->prepare("SELECT * FROM regular_payments WHERE user_id = ?");
-$query->execute([$userId]);
-$regularPayments = $query->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
@@ -135,6 +152,11 @@ $regularPayments = $query->fetchAll(PDO::FETCH_ASSOC);
             <!-- Display user photo -->
             <?php if (isset($user['photo']) && $user['photo']): ?>
                 <img src="<?= htmlspecialchars($user['photo']) ?>" alt="Profile Photo" class="img-thumbnail mb-3" style="max-width: 200px;">
+                <!-- Delete photo form -->
+                <form method="POST" action="profile.php">
+                    <input type="hidden" name="delete_photo" value="1">
+                    <button type="submit" class="btn btn-danger">Delete Photo</button>
+                </form>
             <?php endif; ?>
 
             <!-- Photo upload form -->
@@ -185,33 +207,6 @@ $regularPayments = $query->fetchAll(PDO::FETCH_ASSOC);
                 </div>
                 <button type="submit" class="btn btn-primary">Set Regular Payment</button>
             </form>
-        </div>
-    </div>
-
-    <!-- Display regular payments -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <h2 class="card-title">Your Regular Payments</h2>
-            <table class="table table-bordered">
-                <thead>
-                    <tr>
-                        <th>Amount</th>
-                        <th>Description</th>
-                        <th>Category</th>
-                        <th>Day of the Month</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($regularPayments as $payment): ?>
-                        <tr>
-                            <td>$<?= number_format($payment['amount'], 2) ?></td>
-                            <td><?= htmlspecialchars($payment['description']) ?></td>
-                            <td><?= htmlspecialchars($payment['category']) ?></td>
-                            <td><?= htmlspecialchars($payment['day']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
         </div>
     </div>
 </div>
