@@ -1,47 +1,51 @@
 <?php
 session_start();
-
-// Redirect if not logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-
 include 'db.php';
 
-// Fetch total payments and total spent for the logged-in user
+// Fetch user details
 $userId = $_SESSION['user_id'];
-$query = $db->prepare("SELECT SUM(amount) AS total_spent FROM payments WHERE user_id = ? AND MONTH(date) = MONTH(CURRENT_DATE()) AND YEAR(date) = YEAR(CURRENT_DATE())");
+$username = $_SESSION['username'];
+
+// Fetch total payments
+$query = $db->prepare("SELECT SUM(amount) AS total_spent FROM payments WHERE user_id = ?");
 $query->execute([$userId]);
-$summary = $query->fetch(PDO::FETCH_ASSOC);
-$totalSpent = $summary['total_spent'] ?? 0;
+$totalSpent = $query->fetch(PDO::FETCH_ASSOC)['total_spent'] ?? 0;
 
-// Fetch payments for the logged-in user
-$query = $db->prepare("SELECT amount, description, date, category FROM payments WHERE user_id = ?");
-$query->execute([$_SESSION['user_id']]);
-$payments = $query->fetchAll();
-
-// Prepare events for the calendar
-$events = [];
-foreach ($payments as $payment) {
-    $events[] = [
-        'title' => '$' . number_format($payment['amount'], 2) . ' - ' . $payment['description'],
-        'start' => $payment['date'],
-        'description' => $payment['description'],
-        'amount' => $payment['amount']
-    ];
-}
-
-// Fetch total investments for the logged-in user
+// Fetch total investments
 $query = $db->prepare("SELECT SUM(amount) AS total_invested FROM investments WHERE user_id = ?");
 $query->execute([$userId]);
-$investmentSummary = $query->fetch(PDO::FETCH_ASSOC);
-$totalInvested = $investmentSummary['total_invested'] ?? 0;
+$totalInvested = $query->fetch(PDO::FETCH_ASSOC)['total_invested'] ?? 0;
 
-// Ensure the budget is set in the session
+// Current budget
 $currentBudget = $_SESSION['budget'] ?? 0;
 $remainingBudget = $currentBudget - $totalSpent - $totalInvested;
+
+// Handle adding payments
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['amount'], $_POST['date'], $_POST['description'], $_POST['category'])) {
+    $amount = floatval($_POST['amount']);
+    $date = $_POST['date'];
+    $description = $_POST['description'];
+    $category = $_POST['category'];
+
+    if ($amount > 0 && !empty($date) && !empty($description) && !empty($category)) {
+        $query = $db->prepare("INSERT INTO payments (user_id, amount, date, description, category) VALUES (?, ?, ?, ?, ?)");
+        $query->execute([$userId, $amount, $date, $description, $category]);
+        header("Location: dashboard.php");
+        exit;
+    } else {
+        $error = "Please fill in all fields correctly.";
+    }
+}
+
+// Fetch payments for the logged-in user
+$query = $db->prepare("SELECT * FROM payments WHERE user_id = ? ORDER BY date DESC");
+$query->execute([$userId]);
+$payments = $query->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
@@ -50,142 +54,222 @@ $remainingBudget = $currentBudget - $totalSpent - $totalInvested;
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard</title>
-    <link rel="stylesheet" href="assets/css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css">
-    <script>
-        // Function to toggle dark mode
-        function toggleDarkMode() {
-            document.body.classList.toggle('dark-mode');
-            const mode = document.body.classList.contains('dark-mode') ? 'dark' : 'light';
-            localStorage.setItem('mode', mode);
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <style>
+        body {
+            background-color: #f8f9fa;
         }
-
-        // Apply mode on page load
-        window.onload = function () {
-            if (localStorage.getItem('mode') === 'dark') {
-                document.body.classList.add('dark-mode');
-            }
-        };
-        document.addEventListener('DOMContentLoaded', function () {
-            var calendarEl = document.getElementById('calendar');
-            var calendar = new FullCalendar.Calendar(calendarEl, {
-                initialView: 'dayGridMonth',
-                events: <?= json_encode($events) ?>
-            });
-            calendar.render();
-        });
-    </script>
+        .card {
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .calendar {
+            margin-top: 30px;
+        }
+        .calendar td, .calendar th {
+            text-align: center;
+            padding: 10px;
+        }
+        .calendar .today {
+            background-color: #007bff;
+            color: #fff;
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-   <!-- Navigation Menu -->
-   <nav class="menu">
-        <ul>
-            <li><a href="dashboard.php">Dashboard</a></li>
-            <li><a href="summary.php">Summary</a></li>
-            <li><a href="savings.php">Savings</a></li>
-            <li><a href="logout.php">Logout</a></li>
-            <li><a href="view_savings.php">View Savings (by Code)</a></li>
-
-        </ul>
-        <div class="user-info">
-            <?= htmlspecialchars($_SESSION['username']) ?> | <a href="settings.php">Settings</a> | Remaining Budget: $<?= number_format($remainingBudget, 2) ?>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="dashboard.php">Home Budget App</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link" href="dashboard.php">Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link" href="summary.php">Summary</a></li>
+                <li class="nav-item"><a class="nav-link" href="savings.php">Savings</a></li>
+                <li class="nav-item"><a class="nav-link" href="settings.php">Settings</a></li>
+                <li class="nav-item"><a class="nav-link" href="view_savings.php">View savings</a></li>
+            </ul>
+            <span class="navbar-text">
+                <a href="profile.php"><?= htmlspecialchars($_SESSION['username']) ?></a> | <a href="logout.php" class="text-light">Logout</a>
+            </span>
         </div>
+    </div>
+</nav>
 
-        
-    </nav>
-
-    <div class="container">
-        <h1>Welcome, <?= htmlspecialchars($_SESSION['username']); ?>!</h1>
-
-        <!-- Add Payment Form -->
-        <div class="add-payment">
-            <h2>Add Payment</h2>
-            <form action="add_payment.php" method="POST">
-                <label for="amount">Amount:</label>
-                <input type="number" id="amount" name="amount" step="0.01" required>
-
-                <label for="date">Date:</label>
-                <input type="date" id="date" name="date" required>
-
-                <label for="description">Description:</label>
-                <input type="text" id="description" name="description" required>
-
-                <label for="category">Category:</label>
-                <select id="category" name="category" required>
-                    <option value="Groceries">Groceries</option>
-                    <option value="Rent">Rent</option>
-                    <option value="Utilities">Utilities</option>
-                    <option value="Transportation">Transportation</option>
-                    <option value="Entertainment">Entertainment</option>
-                    <option value="Dining Out">Dining Out</option>
-                    <option value="Healthcare">Healthcare</option>
-                    <option value="Education">Education</option>
-                    <option value="Clothing">Clothing</option>
-                    <option value="Miscellaneous">Miscellaneous</option>
-                </select>
-
-                <button type="submit">Add Payment</button>
-            </form>
+<div class="container my-5">
+    <h1 class="text-center mb-4">Welcome, <?= htmlspecialchars($username) ?>!</h1>
+    <div class="row">
+        <!-- Budget Summary -->
+        <div class="col-md-4">
+            <div class="card text-white bg-primary mb-3">
+                <div class="card-header">Total Budget</div>
+                <div class="card-body">
+                    <h5 class="card-title">$<?= number_format($currentBudget, 2) ?></h5>
+                </div>
+            </div>
         </div>
-
-         <!-- Payments Table -->
-        <div class="payments">
-            <h2>Your Payments</h2>
-            <?php if ($payments): ?>
-                <table>
-    <thead>
-        <tr>
-            <th>Amount</th>
-            <th>Description</th>
-            <th>Date</th>
-            <th>Category</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php foreach ($payments as $payment): ?>
-            <tr>
-                <td>$<?= number_format($payment['amount'], 2) ?></td>
-                <td><?= htmlspecialchars($payment['description']) ?></td>
-                <td><?= htmlspecialchars($payment['date']) ?></td>
-                <td><?= htmlspecialchars($payment['category']) ?></td>
-            </tr>
-        <?php endforeach; ?>
-    </tbody>
-</table>
-
-            <?php else: ?>
-                <p>No payments found!</p>
-            <?php endif; ?>
+        <div class="col-md-4">
+            <div class="card text-white bg-success mb-3">
+                <div class="card-header">Remaining Budget</div>
+                <div class="card-body">
+                    <h5 class="card-title">$<?= number_format($remainingBudget, 2) ?></h5>
+                </div>
+            </div>
         </div>
-
-        <!-- Calendar -->
-        <div id="calendar"></div>
+        <div class="col-md-4">
+            <div class="card text-white bg-danger mb-3">
+                <div class="card-header">Total Spent</div>
+                <div class="card-body">
+                    <h5 class="card-title">$<?= number_format($totalSpent, 2) ?></h5>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            var calendarEl = document.getElementById('calendar');
+    <!-- Add Payment Form -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Add Payment</h5>
+            <?php if (isset($error)): ?>
+                <p class="alert alert-danger"><?= htmlspecialchars($error) ?></p>
+            <?php endif; ?>
+            <form action="dashboard.php" method="POST">
+                <div class="mb-3">
+                    <label for="amount" class="form-label">Amount:</label>
+                    <input type="number" class="form-control" id="amount" name="amount" step="0.01" required>
+                </div>
+                <div class="mb-3">
+                    <label for="date" class="form-label">Date:</label>
+                    <input type="date" class="form-control" id="date" name="date" required>
+                </div>
+                <div class="mb-3">
+                    <label for="description" class="form-label">Description:</label>
+                    <input type="text" class="form-control" id="description" name="description" required>
+                </div>
+                <div class="mb-3">
+                    <label for="category" class="form-label">Category:</label>
+                    <select class="form-control" id="category" name="category" required>
+                        <option value="Groceries">Groceries</option>
+                        <option value="Rent">Rent</option>
+                        <option value="Utilities">Utilities</option>
+                        <option value="Transportation">Transportation</option>
+                        <option value="Entertainment">Entertainment</option>
+                        <option value="Dining Out">Dining Out</option>
+                        <option value="Healthcare">Healthcare</option>
+                        <option value="Education">Education</option>
+                        <option value="Clothing">Clothing</option>
+                        <option value="Miscellaneous">Miscellaneous</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Add Payment</button>
+            </form>
+        </div>
+    </div>
 
-            var calendar = new FullCalendar.Calendar(calendarEl, {
-                initialView: 'dayGridMonth',
-                headerToolbar: {
-                    left: 'prev,next today',
-                    center: 'title',
-                    right: 'dayGridMonth,timeGridWeek,timeGridDay'
-                },
-                events: [
-                    <?php foreach ($payments as $payment): ?>,
-                    {
-                        title: '$<?= htmlspecialchars($payment['amount']) ?> - <?= htmlspecialchars($payment['description']) ?>'
-                        start: '<?= htmlspecialchars($payment['date']) ?>'
-                    }
+    <!-- Payments Table -->
+    <div class="payments">
+        <h2>Your Payments</h2>
+        <?php if ($payments): ?>
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($payments as $payment): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($payment['date']) ?></td>
+                            <td>$<?= number_format($payment['amount'], 2) ?></td>
+                            <td><?= htmlspecialchars($payment['description']) ?></td>
+                            <td><?= htmlspecialchars($payment['category']) ?></td>
+                        </tr>
                     <?php endforeach; ?>
-                ]
-            });
+                </tbody>
+            </table>
+        <?php else: ?>
+            <p>No payments found!</p>
+        <?php endif; ?>
+    </div>
 
-            calendar.render();
-        });
-    </script>
+    <!-- Calendar -->
+    <div class="calendar">
+        <h2 class="text-center">Payment Calendar</h2>
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>Sun</th>
+                    <th>Mon</th>
+                    <th>Tue</th>
+                    <th>Wed</th>
+                    <th>Thu</th>
+                    <th>Fri</th>
+                    <th>Sat</th>
+                </tr>
+            </thead>
+            <tbody id="calendar-body">
+                <!-- Calendar will be dynamically generated here -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    const months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    function generateCalendar(month, year) {
+        const firstDay = new Date(year, month).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        let calendarBody = document.getElementById("calendar-body");
+        calendarBody.innerHTML = "";
+
+        let date = 1;
+        for (let i = 0; i < 6; i++) {
+            let row = document.createElement("tr");
+            for (let j = 0; j < 7; j++) {
+                let cell = document.createElement("td");
+                if (i === 0 && j < firstDay) {
+                    cell.textContent = "";
+                } else if (date > daysInMonth) {
+                    break;
+                } else {
+                    cell.textContent = date;
+                    const payment = payments.find(p => new Date(p.date).getDate() === date && new Date(p.date).getMonth() === month && new Date(p.date).getFullYear() === year);
+                    if (payment) {
+                        cell.innerHTML += `<br>$${payment.amount} - ${payment.description} (${payment.category})`;
+                    }
+                    if (
+                        date === today.getDate() &&
+                        year === today.getFullYear() &&
+                        month === today.getMonth()
+                    ) {
+                        cell.classList.add("today");
+                    }
+                    date++;
+                }
+                row.appendChild(cell);
+            }
+            calendarBody.appendChild(row);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        generateCalendar(currentMonth, currentYear);
+    });
+</script>
 </body>
 </html>

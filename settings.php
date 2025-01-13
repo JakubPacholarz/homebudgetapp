@@ -1,49 +1,49 @@
 <?php
 session_start();
-include 'db.php';
 
-// Ensure user is logged in
+// Redirect if not logged in
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
     exit;
 }
 
-// Fetch logged-in user information
+include 'db.php';
+
 $userId = $_SESSION['user_id'];
 
-// Fetch or generate the user's share code
-function generateShareCode() {
-    return bin2hex(random_bytes(16));
-}
-
-$query = $db->prepare("SELECT share_code FROM users WHERE id = ?");
+// Fetch user data
+$query = $db->prepare("SELECT * FROM users WHERE id = ?");
 $query->execute([$userId]);
-$shareCode = $query->fetchColumn();
+$user = $query->fetch(PDO::FETCH_ASSOC);
 
+$currentBudget = $user['budget'] ?? 0;
+$shareCode = $user['share_code'] ?? '';
+
+// Generate share code if not set
 if (!$shareCode) {
-    $shareCode = generateShareCode();
+    $shareCode = bin2hex(random_bytes(16));
     $query = $db->prepare("UPDATE users SET share_code = ? WHERE id = ?");
     $query->execute([$shareCode, $userId]);
 }
 
-// Handle share code input for viewing another user's savings
-if (isset($_GET['view_code'])) {
-    $viewCode = $_GET['view_code'];
+// Generate a CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 
-    // Validate the share code
-    $query = $db->prepare("SELECT id, username FROM users WHERE share_code = ?");
-    $query->execute([$viewCode]);
-    $sharedUser = $query->fetch(PDO::FETCH_ASSOC);
-
-    if ($sharedUser) {
-        $sharedUserId = $sharedUser['id'];
-
-        // Fetch savings for the shared user
-        $query = $db->prepare("SELECT * FROM savings WHERE user_id = ?");
-        $query->execute([$sharedUserId]);
-        $savings = $query->fetchAll(PDO::FETCH_ASSOC);
+// Handle adding funds
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['funds'], $_POST['csrf_token']) && $_POST['csrf_token'] === $_SESSION['csrf_token']) {
+    $fundsToAdd = floatval($_POST['funds']);
+    if ($fundsToAdd > 0) {
+        $currentBudget += $fundsToAdd;
+        $query = $db->prepare("UPDATE users SET budget = ? WHERE id = ?");
+        $query->execute([$currentBudget, $userId]);
+        $_SESSION['budget'] = $currentBudget;
+        $message = "Funds added successfully!";
+        // Regenerate CSRF token after successful form submission
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     } else {
-        $error = "Invalid share code.";
+        $error = "Please enter a valid amount.";
     }
 }
 ?>
@@ -53,66 +53,80 @@ if (isset($_GET['view_code'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings</title>
-    <link rel="stylesheet" href="assets/css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
     <!-- Navbar -->
-    <nav class="navbar">
-        <div class="container">
-            <ul class="menu">
-                <li><a href="dashboard.php">Dashboard</a></li>
-                <li><a href="summary.php">Summary</a></li>
-                <li><a href="savings.php">Savings</a></li>
-                <li><a href="settings.php">Settings</a></li>
-                <li><a href="logout.php">Logout</a></li>
-            </ul>
-            <div class="navbar-user-info">
-                Logged in as: <?= htmlspecialchars($_SESSION['username']) ?>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">Home Budget App</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link" href="dashboard.php">Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="summary.php">Summary</a></li>
+                    <li class="nav-item"><a class="nav-link" href="savings.php">Savings</a></li>
+                    <li class="nav-item"><a class="nav-link" href="settings.php">Settings</a></li>
+                </ul>
+                <span class="navbar-text">
+                    <?= htmlspecialchars($_SESSION['username']) ?> | <a href="logout.php" class="text-light">Logout</a>
+                </span>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="container">
-        <h1>Settings</h1>
+    <div class="container my-5">
+        <h1 class="mb-4 text-center">Settings</h1>
 
-        <!-- Display the user's share code -->
-        <h2>Your Share Code</h2>
-        <p>Share this code to allow others to view your savings:</p>
-        <p><strong><?= htmlspecialchars($shareCode) ?></strong></p>
+        <!-- Share Code Section -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Your Share Code</h5>
+                <p class="card-text">Share this code to let others view your savings:</p>
+                <div class="alert alert-info" role="alert">
+                    <?= htmlspecialchars($shareCode) ?>
+                </div>
+            </div>
+        </div>
 
-        <!-- Form to view savings by share code -->
-        <h2>View Savings by Code</h2>
-        <form method="GET" action="settings.php">
-            <label for="view_code">Enter Share Code:</label>
-            <input type="text" id="view_code" name="view_code" required>
-            <button type="submit">View Savings</button>
-        </form>
+        <!-- Add Funds Section -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Add Funds</h5>
+                <?php if (isset($message)): ?>
+                    <p class="alert alert-success"><?= htmlspecialchars($message) ?></p>
+                <?php elseif (isset($error)): ?>
+                    <p class="alert alert-danger"><?= htmlspecialchars($error) ?></p>
+                <?php endif; ?>
+                <form method="POST" action="settings.php">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                    <div class="mb-3">
+                        <label for="funds" class="form-label">Amount to Add:</label>
+                        <input type="number" class="form-control" id="funds" name="funds" placeholder="Enter amount" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Add Funds</button>
+                </form>
+            </div>
+        </div>
 
-        <!-- Display savings if a valid share code is provided -->
-        <?php if (isset($sharedUser)): ?>
-            <h2>Savings for <?= htmlspecialchars($sharedUser['username']) ?></h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Investment Type</th>
-                        <th>Amount</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($savings as $saving): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($saving['type']) ?></td>
-                            <td>$<?= number_format($saving['amount'], 2) ?></td>
-                            <td><?= htmlspecialchars($saving['date']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        <?php elseif (isset($error)): ?>
-            <p class="error"><?= htmlspecialchars($error) ?></p>
-        <?php endif; ?>
+        <!-- View Savings Section -->
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">View Savings by Code</h5>
+                <form method="GET" action="view_savings.php">
+                    <div class="mb-3">
+                        <label for="view_code" class="form-label">Enter Share Code:</label>
+                        <input type="text" class="form-control" id="view_code" name="code" placeholder="Enter share code" required>
+                    </div>
+                    <button type="submit" class="btn btn-secondary">View Savings</button>
+                </form>
+            </div>
+        </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
